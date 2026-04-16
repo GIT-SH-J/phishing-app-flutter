@@ -1,0 +1,141 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+// MariaDB uses the mysql connector in Prisma.
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum SocialProvider {
+  KAKAO
+  NAVER
+  GOOGLE
+}
+
+enum SafeBrowsingResult {
+  CLEAN
+  MALICIOUS
+}
+
+enum RiskGrade {
+  SAFE
+  SUSPICIOUS
+  DANGER
+}
+
+model User {
+  id   BigInt @id @default(autoincrement())
+  role Role   @default(USER)
+
+  localAuth   UserLocalAuth?
+  socialAuth  UserSocialAuth[]
+  devices     Device[]
+  messageLogs MessageLog[]
+  alerts      Alert[]
+
+  @@map("users")
+}
+
+model UserLocalAuth {
+  userId       BigInt @id @map("user_id")
+  email        String @unique @db.VarChar(255)
+  passwordHash String @map("password_hash") @db.VarChar(255)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_local_auth")
+}
+
+model UserSocialAuth {
+  id         BigInt         @id @default(autoincrement())
+  userId     BigInt         @map("user_id")
+  provider   SocialProvider
+  providerId String         @map("provider_id") @db.VarChar(255)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerId], map: "provider_provider_id_unique")
+  @@index([userId], map: "idx_user_social_auth_user_id")
+  @@map("user_social_auth")
+}
+
+model Device {
+  deviceId        String  @id @map("device_id") @db.VarChar(255)
+  userId          BigInt? @map("user_id")
+  guestUsageCount Int     @default(0) @map("guest_usage_count")
+
+  user        User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messageLogs MessageLog[]
+
+  @@index([userId], map: "idx_devices_user_id")
+  @@map("devices")
+}
+
+model MessageLog {
+  id          BigInt   @id @default(autoincrement())
+  userId      BigInt?  @map("user_id")
+  deviceId    String   @map("device_id") @db.VarChar(255)
+  sourceApp   String?  @map("source_app") @db.VarChar(50)
+  sender      String?  @db.VarChar(100)
+  content     String?  @db.Text
+  hasUrl      Boolean  @default(false) @map("has_url")
+  collectedAt DateTime @default(now()) @map("collected_at")
+
+  user            User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device          Device           @relation(fields: [deviceId], references: [deviceId], onDelete: Cascade)
+  detectionResult DetectionResult?
+
+  @@index([userId], map: "idx_message_logs_user_id")
+  @@index([deviceId], map: "idx_message_logs_device_id")
+  @@map("message_logs")
+}
+
+model DetectionResult {
+  id                   BigInt              @id @default(autoincrement())
+  logId                BigInt              @unique @map("log_id")
+  extractedUrls        String?             @map("extracted_urls") @db.Text
+  step1Safebrowsing    SafeBrowsingResult? @map("step1_safebrowsing")
+  step2XgboostScore    Float?              @map("step2_xgboost_score")
+  step3KcelectraIntent String?             @map("step3_kcelectra_intent") @db.VarChar(50)
+  finalRiskScore       Int?                @map("final_risk_score")
+  finalRiskGrade       RiskGrade           @map("final_risk_grade")
+  llmResponseGuide     String?             @map("llm_response_guide") @db.Text
+  analyzedAt           DateTime            @default(now()) @map("analyzed_at")
+
+  messageLog MessageLog @relation(fields: [logId], references: [id], onDelete: Cascade)
+  alerts     Alert[]
+
+  @@map("detection_results")
+}
+
+model Alert {
+  id        BigInt   @id @default(autoincrement())
+  userId    BigInt   @map("user_id")
+  resultId  BigInt?  @map("result_id")
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  result DetectionResult? @relation(fields: [resultId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_alerts_user_id")
+  @@index([resultId], map: "idx_alerts_result_id")
+  @@map("alerts")
+}
+
+model DailyStatistic {
+  targetDate      DateTime @id @map("target_date") @db.Date
+  totalScans      Int      @default(0) @map("total_scans")
+  safeCount       Int      @default(0) @map("safe_count")
+  suspiciousCount Int      @default(0) @map("suspicious_count")
+  dangerCount     Int      @default(0) @map("danger_count")
+
+  @@map("daily_statistics")
+}
