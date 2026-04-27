@@ -1,5 +1,10 @@
 import { prisma } from "../../db/prisma";
 import { checkUrlsWithSafeBrowsing } from "../../utils/googleSafeBrowsing";
+import {
+  checkUrlsWithXgboost,
+  type XgboostUrlResult,
+  type XgboostVerdict,
+} from "../../utils/xgboost";
 
 type ScanTextInput = {
   device_id: string;
@@ -16,40 +21,36 @@ type ScanUrlInput = {
 };
 
 function extractUrls(text: string): string[] {
-  // 단순 URL 추출(정교한 파서는 추후 교체 가능)
   const regex = /\bhttps?:\/\/[^\s<>"']+/gi;
   return Array.from(text.match(regex) ?? []);
 }
 
-function decideFinalGrade(params: {
-  isMaliciousBySafeBrowsing: boolean;
-  mockAiGrade: "SAFE" | "SUSPICIOUS" | "DANGER";
-}): "SAFE" | "SUSPICIOUS" | "DANGER" {
-  if (params.isMaliciousBySafeBrowsing) return "DANGER";
-  return params.mockAiGrade;
+function getWorstXgboostVerdict(
+  results: XgboostUrlResult[],
+): XgboostVerdict | null {
+  if (results.length === 0) return null;
+  if (results.some((r) => r.verdict === "malicious")) return "malicious";
+  if (results.some((r) => r.verdict === "suspicious")) return "suspicious";
+  return "safe";
 }
 
-async function mockAiPipeline(): Promise<{
-  grade: "SAFE" | "SUSPICIOUS" | "DANGER";
-  riskScore: number;
-  xgboostScore?: number | null;
-  kcelectraIntent?: string | null;
-  llmGuide?: string | null;
-}> {
-  // TODO: AI 서버(FastAPI) 연동이 준비되면 아래를 axios/fetch로 호출하도록 교체
-  // const res = await axios.post(`${env.AI_BASE_URL}/...`, payload)
-  // return res.data
-  return {
-    grade: "SAFE",
-    riskScore: 0,
-    xgboostScore: null,
-    kcelectraIntent: null,
-    llmGuide: null,
-  };
+function getMaxXgboostScore(results: XgboostUrlResult[]): number | null {
+  if (results.length === 0) return null;
+  return results.reduce((max, r) => (r.score > max ? r.score : max), 0);
+}
+
+function decideFinalGrade(params: {
+  isMaliciousBySafeBrowsing: boolean;
+  worstXgboostVerdict: XgboostVerdict | null;
+}): "SAFE" | "SUSPICIOUS" | "DANGER" {
+  if (params.isMaliciousBySafeBrowsing) return "DANGER";
+
+  if (params.worstXgboostVerdict === "malicious") return "DANGER";
+  if (params.worstXgboostVerdict === "suspicious") return "SUSPICIOUS";
+  return "SAFE";
 }
 
 export class ScansService {
-  // text 스캔: 메시지 원문에서 URL을 추출하고 파이프라인을 수행합니다.
   async scanText(params: {
     input: ScanTextInput;
     userId?: string | null;
@@ -66,7 +67,6 @@ export class ScansService {
     });
   }
 
-  // URL 단독 검사: URL 1개를 파이프라인으로 돌립니다(원문은 url로 저장).
   async scanUrl(params: { input: ScanUrlInput; userId?: string | null }) {
     const { input } = params;
     const urls = [input.url];
@@ -88,8 +88,6 @@ export class ScansService {
     sender: string | null;
     extractedUrls: string[];
   }) {
-    // message_logs.device_id는 devices.device_id를 FK로 참조합니다.
-    // 따라서 message_logs를 저장하기 전에 device 레코드가 반드시 존재해야 합니다.
     await prisma.device.upsert({
       where: { deviceId: args.deviceId },
       create: {
@@ -97,13 +95,11 @@ export class ScansService {
         userId: args.userId ? BigInt(args.userId) : null,
       },
       update: {
-        // 게스트로 먼저 사용하다가 로그인한 경우, userId를 연결해줄 수 있습니다.
         userId: args.userId ? BigInt(args.userId) : undefined,
       },
       select: { deviceId: true },
     });
 
-    // 1단계: message_logs 저장
     const log = await prisma.messageLog.create({
       data: {
         userId: args.userId ? BigInt(args.userId) : null,
@@ -116,7 +112,6 @@ export class ScansService {
       select: { id: true },
     });
 
-    // 2단계: Google Safe Browsing URL 검사 (URL이 있을 때만)
     const safeBrowsingResults =
       args.extractedUrls.length > 0
         ? await checkUrlsWithSafeBrowsing(args.extractedUrls)
@@ -126,14 +121,27 @@ export class ScansService {
       (r) => r.isMalicious,
     );
 
-    // 3~4단계: AI 서버(미구현) → Mock으로 대체
-    const ai = await mockAiPipeline();
+    const xgboostResults =
+      !isMaliciousBySafeBrowsing && args.extractedUrls.length > 0
+        ? await checkUrlsWithXgboost(args.extractedUrls, {
+            sourceApp: args.sourceApp,
+            messageText: args.content,
+          })
+        : [];
 
-    // 5단계: detection_results 저장 + 최종 등급 결정
+    const worstXgboostVerdict = getWorstXgboostVerdict(xgboostResults);
+    const xgboostScore = getMaxXgboostScore(xgboostResults);
+
     const finalRiskGrade = decideFinalGrade({
       isMaliciousBySafeBrowsing,
-      mockAiGrade: ai.grade,
+      worstXgboostVerdict,
     });
+
+    const finalRiskScore = isMaliciousBySafeBrowsing
+      ? 100
+      : xgboostScore !== null
+        ? Math.max(0, Math.min(100, Math.round(xgboostScore * 100)))
+        : 0;
 
     const step1Safebrowsing: "CLEAN" | "MALICIOUS" | null =
       args.extractedUrls.length === 0
@@ -148,11 +156,11 @@ export class ScansService {
         extractedUrls:
           args.extractedUrls.length > 0 ? JSON.stringify(args.extractedUrls) : null,
         step1Safebrowsing,
-        step2XgboostScore: ai.xgboostScore ?? null,
-        step3KcelectraIntent: ai.kcelectraIntent ?? null,
-        finalRiskScore: ai.riskScore,
+        step2XgboostScore: xgboostScore,
+        step3KcelectraIntent: null,
+        finalRiskScore,
         finalRiskGrade,
-        llmResponseGuide: ai.llmGuide ?? null,
+        llmResponseGuide: null,
       },
       select: {
         id: true,
@@ -169,10 +177,10 @@ export class ScansService {
       result_id: detection.id.toString(),
       extracted_urls: args.extractedUrls,
       safe_browsing: safeBrowsingResults,
+      xgboost: xgboostResults,
       final_risk_grade: detection.finalRiskGrade,
       final_risk_score: detection.finalRiskScore,
       analyzed_at: detection.analyzedAt,
     };
   }
 }
-
