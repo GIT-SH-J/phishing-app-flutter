@@ -1,65 +1,120 @@
 import 'package:flutter/material.dart';
+
 import 'chatbot_screen.dart';
 
 class ResultScreen extends StatelessWidget {
   final String inputText;
+  final String sourceApp;
+  final String messageText;
+  final String detectedUrl;
+
   final String label;
   final double score;
   final String reason;
   final String action;
 
+  final String? finalRiskGrade;
+  final int? finalRiskScore;
+  final List<Map<String, dynamic>> safeBrowsing;
+
+  final bool? xgboostUsed;
+  final double? xgboostScore;
+  final String? xgboostVerdict;
+
+  final bool? kcelectraUsed;
+  final double? kcelectraScore;
+  final String? kcelectraIntent;
+  final String? kcelectraVerdict;
+
+  final String? analyzedAt;
+  final String? errorMessage;
+
   const ResultScreen({
     super.key,
     required this.inputText,
+    required this.sourceApp,
+    required this.messageText,
+    required this.detectedUrl,
     required this.label,
     required this.score,
     required this.reason,
     required this.action,
+    this.finalRiskGrade,
+    this.finalRiskScore,
+    this.safeBrowsing = const <Map<String, dynamic>>[],
+    this.xgboostUsed,
+    this.xgboostScore,
+    this.xgboostVerdict,
+    this.kcelectraUsed,
+    this.kcelectraScore,
+    this.kcelectraIntent,
+    this.kcelectraVerdict,
+    this.analyzedAt,
+    this.errorMessage,
   });
 
-  Color get _labelColor {
-    switch (label) {
-      case '위험':
+  String get _gradeText => (finalRiskGrade ?? label).toUpperCase();
+
+  Color get _gradeColor {
+    switch (_gradeText) {
+      case 'DANGER':
         return const Color(0xFFF44336);
-      case '주의':
-        return const Color(0xFFFFC107);
-      default:
+      case 'SUSPICIOUS':
+        return const Color(0xFFFF9800);
+      case 'SAFE':
         return const Color(0xFF4CAF50);
+      default:
+        return Colors.grey;
     }
   }
 
-  IconData get _labelIcon {
-    switch (label) {
-      case '위험':
+  IconData get _gradeIcon {
+    switch (_gradeText) {
+      case 'DANGER':
         return Icons.dangerous_outlined;
-      case '주의':
+      case 'SUSPICIOUS':
         return Icons.warning_amber_outlined;
-      default:
+      case 'SAFE':
         return Icons.check_circle_outline;
+      default:
+        return Icons.help_outline;
     }
+  }
+
+  String _formatSafeBrowsing() {
+    if (safeBrowsing.isEmpty) return '-';
+    return safeBrowsing.map((item) {
+      final url = item['url']?.toString() ?? '-';
+      final isMalicious = item['isMalicious'] == true;
+      return '${isMalicious ? 'malicious' : 'safe'} ($url)';
+    }).join('\n');
+  }
+
+  String _formatBool(bool? value) => value == null ? '-' : (value ? 'true' : 'false');
+
+  String _formatDouble(double? value, {int fraction = 6}) {
+    if (value == null) return '-';
+    return value.toStringAsFixed(fraction);
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final riskPercent = finalRiskScore?.toDouble() ?? score;
 
-    // 다크모드 색상 부드럽게 조정
     Color bgColor;
-    switch (label) {
-      case '위험':
-        bgColor = isDark
-            ? const Color(0xFF2D1515)
-            : const Color(0xFFFFEBEE);
+    switch (_gradeText) {
+      case 'DANGER':
+        bgColor = isDark ? const Color(0xFF2D1515) : const Color(0xFFFFEBEE);
         break;
-      case '주의':
-        bgColor = isDark
-            ? const Color(0xFF2D2510)
-            : const Color(0xFFFFFDE7);
+      case 'SUSPICIOUS':
+        bgColor = isDark ? const Color(0xFF2D2510) : const Color(0xFFFFF3E0);
+        break;
+      case 'SAFE':
+        bgColor = isDark ? const Color(0xFF152D1F) : const Color(0xFFE8F5E9);
         break;
       default:
-        bgColor = isDark
-            ? const Color(0xFF152D1F)
-            : const Color(0xFFE8F5E9);
+        bgColor = isDark ? const Color(0xFF1F1F1F) : const Color(0xFFF5F5F5);
     }
 
     return Scaffold(
@@ -86,72 +141,84 @@ class ResultScreen extends StatelessWidget {
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
               Container(
                 width: 120,
                 height: 120,
                 decoration: BoxDecoration(
-                  color: _labelColor.withOpacity(0.15),
+                  color: _gradeColor.withValues(alpha: 0.15),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(_labelIcon, size: 70, color: _labelColor),
+                child: Icon(_gradeIcon, size: 70, color: _gradeColor),
               ),
-              const SizedBox(height: 24),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 48,
-                  fontWeight: FontWeight.bold,
-                  color: _labelColor,
+              const SizedBox(height: 16),
+              Center(
+                child: Text(
+                  _gradeText,
+                  style: TextStyle(
+                    fontSize: 40,
+                    fontWeight: FontWeight.bold,
+                    color: _gradeColor,
+                  ),
                 ),
               ),
               const SizedBox(height: 8),
-              Text(
-                '위험도 ${score.toInt()}%',
-                style: TextStyle(
-                  fontSize: 20,
-                  color: _labelColor,
-                  fontWeight: FontWeight.w600,
+              Center(
+                child: Text(
+                  '위험도 ${riskPercent.toInt()}%',
+                  style: TextStyle(
+                    fontSize: 20,
+                    color: _gradeColor,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
-              const SizedBox(height: 32),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: LinearProgressIndicator(
-                  value: score / 100,
-                  minHeight: 16,
-                  backgroundColor: isDark
-                      ? Colors.white.withOpacity(0.15)
-                      : Colors.white,
-                  valueColor: AlwaysStoppedAnimation<Color>(_labelColor),
-                ),
-              ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 20),
               _ResultCard(
-                title: '검사한 내용',
-                content: inputText,
+                title: '기본 정보',
                 icon: Icons.text_snippet_outlined,
                 isDark: isDark,
+                rows: [
+                  _row('앱/출처', sourceApp),
+                  _row('본문', messageText.isEmpty ? inputText : messageText),
+                  _row('URL', detectedUrl),
+                  _row('최종 등급', _gradeText),
+                  _row('최종 점수', finalRiskScore?.toString() ?? '-'),
+                  _row('분석 시각', analyzedAt ?? '-'),
+                ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 14),
               _ResultCard(
-                title: '판단 이유',
-                content: reason,
+                title: '탐지 상세',
+                icon: Icons.security_outlined,
+                isDark: isDark,
+                rows: [
+                  _row('Safe Browsing', _formatSafeBrowsing()),
+                  _row('XGBoost used', _formatBool(xgboostUsed)),
+                  _row('XGBoost score', _formatDouble(xgboostScore)),
+                  _row('XGBoost verdict', xgboostVerdict ?? '-'),
+                  _row('KcELECTRA used', _formatBool(kcelectraUsed)),
+                  _row('KcELECTRA score', _formatDouble(kcelectraScore)),
+                  _row('KcELECTRA intent', kcelectraIntent ?? '-'),
+                  _row('KcELECTRA verdict', kcelectraVerdict ?? '-'),
+                ],
+              ),
+              const SizedBox(height: 14),
+              _ResultCard(
+                title: '판단 및 대처',
                 icon: Icons.info_outline,
                 isDark: isDark,
-              ),
-              const SizedBox(height: 16),
-              _ResultCard(
-                title: '대처 방법',
-                content: action,
-                icon: Icons.shield_outlined,
                 highlight: true,
-                isDark: isDark,
+                rows: [
+                  _row('판단 이유', reason),
+                  _row('대처 방법', action),
+                  if (errorMessage != null && errorMessage!.isNotEmpty)
+                    _row('에러 메시지', errorMessage!, color: Colors.red),
+                ],
               ),
-              const SizedBox(height: 32),
-
-              // AI 상담사 버튼 → 챗봇으로 이동하면서 내용 전달
+              const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
                 height: 56,
@@ -163,7 +230,7 @@ class ResultScreen extends StatelessWidget {
                       MaterialPageRoute(
                         builder: (context) => ChatBotScreen(
                           initialMessage:
-                              '검사한 내용: $inputText\n판단 결과: $label ($score%)\n이유: $reason',
+                              '검사 URL: $detectedUrl\n최종 등급: $_gradeText\n최종 점수: ${finalRiskScore ?? riskPercent.toInt()}\n판단 이유: $reason',
                           onBackHome: () => Navigator.pop(context),
                         ),
                       ),
@@ -179,10 +246,7 @@ class ResultScreen extends StatelessWidget {
                   icon: const Icon(Icons.chat_bubble_outline),
                   label: const Text(
                     'AI 상담사에게 물어보기',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
@@ -207,27 +271,41 @@ class ResultScreen extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(height: 24),
             ],
           ),
         ),
       ),
     );
   }
+
+  _ResultRow _row(String label, String value, {Color? color}) =>
+      _ResultRow(label: label, value: value, color: color);
+}
+
+class _ResultRow {
+  final String label;
+  final String value;
+  final Color? color;
+
+  const _ResultRow({
+    required this.label,
+    required this.value,
+    this.color,
+  });
 }
 
 class _ResultCard extends StatelessWidget {
   final String title;
-  final String content;
   final IconData icon;
   final bool highlight;
   final bool isDark;
+  final List<_ResultRow> rows;
 
   const _ResultCard({
     required this.title,
-    required this.content,
     required this.icon,
     required this.isDark,
+    required this.rows,
     this.highlight = false,
   });
 
@@ -235,26 +313,26 @@ class _ResultCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: highlight
-            ? const Color(0xFF1976D2).withOpacity(0.12)
+            ? const Color(0xFF1976D2).withValues(alpha: 0.12)
             : isDark
-                ? Colors.white.withOpacity(0.08)
+                ? Colors.white.withValues(alpha: 0.08)
                 : Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: highlight
-            ? Border.all(color: const Color(0xFF1976D2).withOpacity(0.4))
-            : Border.all(
-                color: isDark
-                    ? Colors.white.withOpacity(0.1)
-                    : Colors.transparent,
-              ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: highlight
+              ? const Color(0xFF1976D2).withValues(alpha: 0.35)
+              : isDark
+                  ? Colors.white.withValues(alpha: 0.1)
+                  : Colors.transparent,
+        ),
         boxShadow: isDark
             ? []
             : [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
+                  color: Colors.black.withValues(alpha: 0.05),
                   blurRadius: 8,
                   offset: const Offset(0, 2),
                 ),
@@ -277,17 +355,41 @@ class _ResultCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          Text(
-            content,
-            style: TextStyle(
-              fontSize: 17,
-              height: 1.6,
-              color: isDark
-                  ? Colors.white.withOpacity(0.87)
-                  : Colors.black87,
+          const SizedBox(height: 10),
+          for (final row in rows) ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 128,
+                  child: Text(
+                    row.label,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.7)
+                          : Colors.black54,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    row.value,
+                    style: TextStyle(
+                      fontSize: 15,
+                      height: 1.45,
+                      color: row.color ??
+                          (isDark
+                              ? Colors.white.withValues(alpha: 0.9)
+                              : Colors.black87),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ),
+            const SizedBox(height: 6),
+          ],
         ],
       ),
     );

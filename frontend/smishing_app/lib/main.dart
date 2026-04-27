@@ -1,5 +1,4 @@
-﻿import 'package:flutter/material.dart';
-
+import 'package:flutter/material.dart';
 import 'app_state.dart';
 import 'screens/access_screen.dart';
 

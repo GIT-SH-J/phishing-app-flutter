@@ -333,41 +333,100 @@ class _MainScreenState extends State<MainScreen> {
 
     setState(() => _isLoading = true);
 
-    String resultLabel = '二쇱쓽';
+    String resultLabel = '주의';
     double score = 50.0;
-    String reason = 'Threat verification is currently unavailable.';
-    String action = 'Try again later and avoid clicking unknown links now.';
+    String reason = '분석 서버 응답을 기다리는 중입니다.';
+    String action = '잠시 후 다시 시도하세요.';
+
+    String finalRiskGrade = 'UNKNOWN';
+    int finalRiskScore = 0;
+    List<Map<String, dynamic>> safeBrowsing = <Map<String, dynamic>>[];
+
+    bool? xgboostUsed;
+    double? xgboostScore;
+    String? xgboostVerdict;
+
+    bool? kcelectraUsed;
+    double? kcelectraScore;
+    String? kcelectraIntent;
+    String? kcelectraVerdict;
+
+    String? analyzedAt;
+    String? errorMessage;
 
     try {
-      final response = await ApiService.checkUrl(
+      final response = await ApiService.scanUrl(
+        deviceId: 'android-test-device',
         url: detectedUrl,
         sourceApp: 'manual_input',
-        messageText: inputText,
       );
 
-      final verdict = (response['finalVerdict'] ?? 'unknown').toString();
+      finalRiskGrade =
+          (response['final_risk_grade'] ?? 'UNKNOWN').toString().toUpperCase();
+      finalRiskScore = _toIntScore(response['final_risk_score']);
+      safeBrowsing = _asMapList(response['safe_browsing']);
+      analyzedAt = response['analyzed_at']?.toString();
 
-      if (verdict == 'malicious') {
-        resultLabel = '?꾪뿕';
-        score = 90.0;
-        reason = 'Google Safe Browsing classified this URL as malicious.';
-        action = 'Do not open the link. Block sender and delete the message.';
-      } else if (verdict == 'suspicious') {
-        resultLabel = '二쇱쓽';
-        score = 65.0;
-        reason = 'This URL is suspicious and needs additional verification.';
-        action = 'Verify sender/channel before opening the link.';
-      } else if (verdict == 'safe') {
-        resultLabel = '?덉쟾';
-        score = 15.0;
-        reason = 'No immediate threat was detected by Safe Browsing.';
-        action = 'Stay cautious and avoid entering sensitive information.';
+      final xgboostMap = _asMap(response['xgboost']);
+      final xgboostList = _asMapList(response['xgboost']);
+      if (xgboostMap != null) {
+        xgboostUsed = xgboostMap['used'] as bool?;
+        xgboostScore = _toDouble(xgboostMap['score']);
+        xgboostVerdict = xgboostMap['verdict']?.toString();
+      } else if (xgboostList.isNotEmpty) {
+        xgboostUsed = true;
+        xgboostScore = xgboostList
+            .map((e) => _toDouble(e['score']) ?? 0.0)
+            .fold<double>(0.0, (prev, next) => next > prev ? next : prev);
+        xgboostVerdict = _pickWorstVerdict(
+          xgboostList
+              .map((e) => e['verdict']?.toString())
+              .whereType<String>()
+              .toList(),
+        );
+      } else {
+        xgboostUsed = false;
       }
-    } catch (_) {
-      resultLabel = '二쇱쓽';
+
+      final kcelectraMap = _asMap(response['kcelectra']);
+      if (kcelectraMap != null) {
+        kcelectraUsed = kcelectraMap['used'] as bool?;
+        kcelectraScore = _toDouble(kcelectraMap['score']);
+        kcelectraIntent = kcelectraMap['intent']?.toString();
+        kcelectraVerdict = kcelectraMap['verdict']?.toString();
+      }
+
+      switch (finalRiskGrade) {
+        case 'DANGER':
+          resultLabel = '위험';
+          score = finalRiskScore.toDouble();
+          reason = '최종 등급이 DANGER로 판정되었습니다.';
+          action = '링크를 열지 말고 발신자를 차단한 뒤 메시지를 삭제하세요.';
+          break;
+        case 'SUSPICIOUS':
+          resultLabel = '주의';
+          score = finalRiskScore.toDouble();
+          reason = '최종 등급이 SUSPICIOUS로 판정되었습니다.';
+          action = '공식 채널에서 발신자/링크를 재확인하세요.';
+          break;
+        case 'SAFE':
+          resultLabel = '안전';
+          score = finalRiskScore.toDouble();
+          reason = '현재 분석 기준에서 위협 징후가 낮습니다.';
+          action = '그래도 개인정보 입력 전에는 주소를 다시 확인하세요.';
+          break;
+        default:
+          resultLabel = '주의';
+          score = finalRiskScore.toDouble();
+          reason = '최종 등급을 확인할 수 없습니다.';
+          action = '링크 클릭 전 추가 확인을 권장합니다.';
+      }
+    } catch (e) {
+      errorMessage = e.toString();
+      resultLabel = '주의';
       score = 50.0;
-      reason = 'API request failed while verifying the URL.';
-      action = 'Check network/server status and try again.';
+      reason = 'API 호출 중 오류가 발생했습니다.';
+      action = '네트워크 또는 서버 상태를 확인 후 다시 시도하세요.';
     }
 
     final history = ScanHistory(
@@ -388,13 +447,63 @@ class _MainScreenState extends State<MainScreen> {
       MaterialPageRoute(
         builder: (context) => ResultScreen(
           inputText: inputText,
+          sourceApp: 'manual_input',
+          messageText: inputText,
+          detectedUrl: detectedUrl,
           label: resultLabel,
           score: score,
           reason: reason,
           action: action,
+          finalRiskGrade: finalRiskGrade,
+          finalRiskScore: finalRiskScore,
+          safeBrowsing: safeBrowsing,
+          xgboostUsed: xgboostUsed,
+          xgboostScore: xgboostScore,
+          xgboostVerdict: xgboostVerdict,
+          kcelectraUsed: kcelectraUsed,
+          kcelectraScore: kcelectraScore,
+          kcelectraIntent: kcelectraIntent,
+          kcelectraVerdict: kcelectraVerdict,
+          analyzedAt: analyzedAt,
+          errorMessage: errorMessage,
         ),
       ),
     );
+  }
+
+  Map<String, dynamic>? _asMap(dynamic raw) {
+    if (raw is! Map) return null;
+    return raw.map((k, v) => MapEntry(k.toString(), v));
+  }
+
+  List<Map<String, dynamic>> _asMapList(dynamic raw) {
+    if (raw is! List) return const <Map<String, dynamic>>[];
+    return raw
+        .whereType<Map>()
+        .map((e) => e.map((k, v) => MapEntry(k.toString(), v)))
+        .toList();
+  }
+
+  double? _toDouble(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is num) return raw.toDouble();
+    return double.tryParse(raw.toString());
+  }
+
+  int _toIntScore(dynamic raw) {
+    if (raw is int) return raw;
+    if (raw is num) return raw.round();
+    return int.tryParse(raw?.toString() ?? '') ??
+        double.tryParse(raw?.toString() ?? '')?.round() ??
+        0;
+  }
+
+  String? _pickWorstVerdict(List<String> verdicts) {
+    final normalized = verdicts.map((e) => e.toLowerCase()).toList();
+    if (normalized.contains('malicious')) return 'malicious';
+    if (normalized.contains('suspicious')) return 'suspicious';
+    if (normalized.contains('safe')) return 'safe';
+    return verdicts.isEmpty ? null : verdicts.first;
   }
   Future<void> _clearAllHistory() async {
     await HistoryService.clearHistory();
