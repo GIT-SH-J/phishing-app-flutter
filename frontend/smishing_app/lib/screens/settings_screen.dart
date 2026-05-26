@@ -3,6 +3,7 @@ import '../app_state.dart';
 import '../widgets/setting_header.dart';
 import 'login_screen.dart';
 import 'profile_screen.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class SettingsScreen extends StatefulWidget {
   final VoidCallback? onBackHome;
@@ -16,10 +17,17 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   VoidCallback? _listener;
 
+  final _storage = const FlutterSecureStorage(); // 추가
+  String _userName = '사용자'; 
+  String _userEmail = '이메일 정보 없음';
+  String _loginPlatform = '연동 중';
+ 
+  
   @override
   void initState() {
     super.initState();
-
+    _loadUserData(); // 추가 로그인 데이터 로드
+    
     _listener = () {
       if (mounted) setState(() {});
     };
@@ -27,6 +35,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
     appState.addListener(_listener!);
   }
 
+  Future<void> _loadUserData() async {
+    String? savedName = await _storage.read(key: 'user_name');
+    String? savedEmail = await _storage.read(key: 'user_email');
+    String? platform = await _storage.read(key: 'login_platform');
+
+    if (mounted) {
+      setState(() {
+        if (savedName != null) _userName = savedName;
+        if (savedEmail != null) _userEmail = savedEmail;
+        if (platform != null) {
+          if (platform == 'kakao') _loginPlatform = '카카오 로그인 연동됨';
+          else if (platform == 'naver') _loginPlatform = '네이버 로그인 연동됨';
+          else if (platform == 'google') _loginPlatform = '구글 로그인 연동됨';
+          else _loginPlatform = '일반 로그인 연동됨';
+        }
+      });
+    }
+  }
+  
   @override
   void dispose() {
     if (_listener != null) {
