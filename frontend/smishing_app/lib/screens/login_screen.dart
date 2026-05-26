@@ -6,6 +6,11 @@ import 'signup_screen.dart';
 import 'onboarding_screen.dart';
 import 'permission_screen.dart';
 import '../widgets/social_login_button.dart';
+import 'package:http/http.dart' as http; //  서버 통신 패키지
+import 'dart:convert'; // 
+import 'package:url_launcher/url_launcher.dart'; //  외부 브라우저 실행 패키지
+import 'package:app_links/app_links.dart'; 
+import 'package:flutter_secure_storage/flutter_secure_storage.dart'; 
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -21,6 +26,72 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _obscurePassword = true;
   bool _isLoading = false;
 
+ late AppLinks _appLinks;
+ final _storage = const FlutterSecureStorage();
+
+  @override
+  void initState() {
+    super.initState();
+    _initDeepLinks(); 
+  }
+
+  void _initDeepLinks() {
+    _appLinks = AppLinks();
+
+    _appLinks.uriLinkStream.listen((Uri? uri) async {
+      if (uri == null) return;
+
+      debugPrint('🔗 감지된 딥링크 수신 호스트: ${uri.host}');
+
+      if (uri.host == 'login-success') {
+        final String? token = uri.queryParameters['token'];
+        final String? platform = uri.queryParameters['platform'];
+        final String? rawName = uri.queryParameters['name'];
+        final String? rawEmail = uri.queryParameters['email'];
+        
+        String? name;
+        String? email;
+        try {
+          if (rawName != null) name = Uri.decodeComponent(rawName);
+          if (rawEmail != null) email = Uri.decodeComponent(rawEmail);
+        } catch (e) {
+          debugPrint('데이터 디코딩 오류 (기본값 대체): $e');
+          name = rawName;
+          email = rawEmail;
+        }
+
+        if (token != null) {
+          debugPrint('[$platform 간편로그인 성공] 토큰 획득 완료');
+          debugPrint('파싱된 유저 정보 -> 이름: $name, 이메일: $email');
+          
+          // 기기 보안 저장소 금고에 사용자 세션 정보 영구 박음질
+          await _storage.write(key: 'user_token', value: token);
+          await _storage.write(key: 'login_platform', value: platform ?? 'unknown');
+          
+          if (name != null) await _storage.write(key: 'user_name', value: name);
+          if (email != null) await _storage.write(key: 'user_email', value: email);
+          
+          appState.login();
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const HomeScreen()),
+            );
+          }
+        }
+      } else if (uri.host == 'login-fail') {
+        debugPrint('간편로그인 실패 신호 수신');
+        _showSnack('소셜 로그인에 실패했습니다. 다시 시도해주세요.');
+      }
+    }, onError: (err) {
+      debugPrint('딥링크 리스너 내부 에러: $err');
+    });
+  }
+
+  bool _isValidEmail(String value) {
+    return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value);
+  }
+ 
   Future<void> _handleLogin() async {
     final email = _emailController.text.trim();
     final password = _pwController.text;
@@ -38,36 +109,60 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final result = await AuthApiService.login(
-        email: email,
-        password: password,
-      );
+      final response = await http.post(
+        Uri.parse('http://43.201.26.98:3000/api/auth/login'), 
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'email': email, 'password': password}),
+      ).timeout(const Duration(seconds: 5));
 
-      appState.setAuthenticatedSession(result.user);
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(response.body);
+        final String? token = responseData['token'];
 
-      if (!mounted) return;
+        if (token != null) {
+          await _storage.write(key: 'user_token', value: token);
+          await _storage.write(key: 'login_platform', value: 'email');
+          // 일반 로그인의 경우 받아온 이메일을 식별값으로 금고에 함께 보관
+          await _storage.write(key: 'user_email', value: email);
+          await _storage.write(key: 'user_name', value: email.split('@')[0]);
+        }
 
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => const PermissionScreen(),
-        ),
-      );
-    } on ApiException catch (e) {
-      _showSnack(e.message);
-    } catch (_) {
-      _showSnack('로그인 중 오류가 발생했습니다');
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
+        appState.login();
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const HomeScreen()),
+          );
+        }
+      } else {
+        _showSnack('아이디 또는 비밀번호가 올바르지 않습니다.');
       }
-    }
+    } catch (e) {
+      _showSnack('서버 연결 실패! 팀플 백엔드를 확인하세요.');
+    } finally {
+      if (mounted) setState(() => _isLoading = false); 
   }
 
+  // 소셜 로그인 실행 함수 (카카오, 네이버, 구글 주소 호출)
+  void _handleSocialLogin(String platform) async {
+    final url = Uri.parse('http://43.....파일 공유 URL...$platform');
+    debugPrint('🚀 외부 브라우저 오픈 요청 API URL: $url');
+    
+    try {
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+      } else {
+        debugPrint('브라우저를 열 수 없는 주소입니다: $url');
+      }
+    } catch (e) {
+      debugPrint('소셜 로그인 링크 런처 오류: $e');
+    }
+  }
+    
   Future<void> _continueAsGuest() async {
-    await appState.logout();
+    await appState.logout(); // 오류시 await 삭제 appState.logout();
 
-    if (!context.mounted) return;
+    if (!context.mounted) return; // 오류 시 if (!mounted) return;
 
     Navigator.pushReplacement(
       context,
@@ -76,6 +171,7 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
     );
   }
+    
 
   bool _isValidEmail(String value) {
     return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value);
@@ -344,9 +440,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 icon: Icons.chat_bubble,
                 iconColor: const Color(0xFF191919),
                 text: '카카오로 시작하기',
-                onTap: () {
-                  _showSnack('간편 로그인은 다음 단계에서 연동됩니다');
-                },
+                onTap: () => _handleSocialLogin('kakao') 
               ),
               const SizedBox(height: 12),
               SocialLoginButton(
@@ -355,9 +449,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 icon: Icons.login,
                 iconColor: Colors.white,
                 text: '네이버로 시작하기',
-                onTap: () {
-                  _showSnack('간편 로그인은 다음 단계에서 연동됩니다');
-                },
+                onTap: () => _handleSocialLogin('naver')
               ),
               const SizedBox(height: 12),
               SocialLoginButton(
@@ -366,9 +458,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 icon: Icons.g_mobiledata,
                 iconColor: const Color(0xFF4285F4),
                 text: '구글로 시작하기',
-                onTap: () {
-                  _showSnack('간편 로그인은 다음 단계에서 연동됩니다');
-                },
+                onTap: () => _handleSocialLogin('google'),
                 hasBorder: true,
               ),
               const SizedBox(height: 22),
