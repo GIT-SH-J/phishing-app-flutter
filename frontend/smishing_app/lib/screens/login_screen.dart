@@ -1,4 +1,9 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart'; 
+import 'package:app_links/app_links.dart';       
+import 'package:flutter_secure_storage/flutter_secure_storage.dart'; 
 import '../app_state.dart';
 import '../services/api_client.dart';
 import '../services/auth_api_service.dart';
@@ -21,6 +26,87 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _obscurePassword = true;
   bool _isLoading = false;
 
+  // 간편 로그인 관리 변수
+  final _storage = const FlutterSecureStorage();
+  late AppLinks _appLinks;
+
+  @override
+  void initState() {
+    super.initState();
+    _initDeepLinks(); 
+  }
+
+  void _initDeepLinks() {
+    _appLinks = AppLinks();
+
+    _appLinks.uriLinkStream.listen((Uri? uri) async {
+      if (uri == null) return;
+
+      debugPrint('🔗 [딥링크 감지] 수신된 전체 URI: $uri');
+
+      if (uri.toString().contains('login-success')) {
+        final String? token = uri.queryParameters['token'];
+        final String? platform = uri.queryParameters['platform'];
+        final String? rawName = uri.queryParameters['name'];
+        final String? rawEmail = uri.queryParameters['email'];
+        
+        String? name;
+        String? email;
+        try {
+          if (rawName != null) name = Uri.decodeComponent(rawName);
+          if (rawEmail != null) email = Uri.decodeComponent(rawEmail);
+        } catch (e) {
+          debugPrint('데이터 디코딩 오류 (기본값 대체): $e');
+          name = rawName;
+          email = rawEmail;
+        }
+
+        if (token != null) {
+          debugPrint('[$platform 간편로그인 성공] 토큰 획득 완료');
+          
+          await _storage.write(key: 'user_token', value: token);
+          await _storage.write(key: 'login_platform', value: platform ?? 'unknown');
+          await _storage.write(key: 'user_name', value: name ?? '소셜 사용자');
+          await _storage.write(key: 'user_email', value: email ?? 'social_user@email.com');
+          
+          appState.login();
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const PermissionScreen()),
+            );
+          }
+        }
+      } else if (uri.toString().contains('login-fail')) {
+        debugPrint('간편로그인 실패 신호 수신');
+        _showSnack('소셜 로그인에 실패했습니다. 다시 시도해주세요.');
+      }
+    }, onError: (err) {
+      debugPrint('딥링크 리스너 내부 에러: $err');
+    });
+  }
+
+  void _handleSocialLogin(String platform) async {
+    String urlString = 'http://?.?.?.?:3000/api/auth/$platform';
+    final url = Uri.parse(urlString);
+    debugPrint('🚀 외부 브라우저 오픈 요청 API URL: $url');
+    
+    try {
+      if (await canLaunchUrl(url)) {
+        await launchUrl(
+          url, 
+          mode: LaunchMode.externalApplication, 
+        );
+      } else {
+        debugPrint('브라우저를 열 수 없는 주소입니다: $url');
+        _showSnack('로그인 페이지를 열 수 없습니다.');
+      }
+    } catch (e) {
+      debugPrint('소셜 로그인 링크 런처 오류: $e');
+    }
+  }
+
+  // 일반 이메일 로그인 요청 처리
   Future<void> _handleLogin() async {
     final email = _emailController.text.trim();
     final password = _pwController.text;
@@ -42,6 +128,21 @@ class _LoginScreenState extends State<LoginScreen> {
         email: email,
         password: password,
       );
+
+      final String token = '';
+      String name = email.split('@')[0];
+      try {
+        if (result.user != null) {
+          name = (result.user as dynamic).name ?? name;
+        }
+      } catch (_) {
+        debugPrint('유저 이름 파싱 실패 - 이메일 기본값 대체');
+      }
+
+      await _storage.write(key: 'user_token', value: token);
+      await _storage.write(key: 'login_platform', value: 'email');
+      await _storage.write(key: 'user_name', value: name);
+      await _storage.write(key: 'user_email', value: email);
 
       appState.setAuthenticatedSession(result.user);
 
@@ -66,6 +167,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _continueAsGuest() async {
     await appState.logout();
+    await _storage.deleteAll();
 
     if (!context.mounted) return;
 
@@ -344,9 +446,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 icon: Icons.chat_bubble,
                 iconColor: const Color(0xFF191919),
                 text: '카카오로 시작하기',
-                onTap: () {
-                  _showSnack('간편 로그인은 다음 단계에서 연동됩니다');
-                },
+                onTap: () => _handleSocialLogin('kakao'),
               ),
               const SizedBox(height: 12),
               SocialLoginButton(
@@ -355,9 +455,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 icon: Icons.login,
                 iconColor: Colors.white,
                 text: '네이버로 시작하기',
-                onTap: () {
-                  _showSnack('간편 로그인은 다음 단계에서 연동됩니다');
-                },
+                onTap: () => _handleSocialLogin('naver'),
               ),
               const SizedBox(height: 12),
               SocialLoginButton(
@@ -366,9 +464,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 icon: Icons.g_mobiledata,
                 iconColor: const Color(0xFF4285F4),
                 text: '구글로 시작하기',
-                onTap: () {
-                  _showSnack('간편 로그인은 다음 단계에서 연동됩니다');
-                },
+                onTap: () => _handleSocialLogin('google'),
                 hasBorder: true,
               ),
               const SizedBox(height: 22),
