@@ -7,4 +7,9 @@ class ApiConfig {
     'API_BASE_URL',
     defaultValue: 'https://api.maknae.synology.me',
   );
+
+    static const String authBaseUrl = String.fromEnvironment(
+      'AUTH_BASE_URL',
+      defaultValue: 'YOUR_SERVER_IP_HERE',
+  );
 }
