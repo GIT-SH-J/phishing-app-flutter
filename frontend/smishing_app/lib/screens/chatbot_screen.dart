@@ -17,10 +17,9 @@ class _ChatBotScreenState extends State<ChatBotScreen> {
   final ScrollController _scrollController = ScrollController();
 
   late List<Map<String, dynamic>> _messages;
-
   bool _isLoading = false;
 
-  static const String _geminiApiKey = '_여기에 api키를 입력하세요_';
+  static const String _openAiApiKey = '_여기에 api키를 입력하세요_';
 
   @override
   void initState() {
@@ -28,7 +27,7 @@ class _ChatBotScreenState extends State<ChatBotScreen> {
 
     _messages = [
       {
-        'text': '안녕하세요. 무엇이든 편하게 물어보세요.',
+        'text': '안녕하세요. 스미싱 탐지기 AI 보안 상담사입니다. 무엇이든 편하게 물어보세요.',
         'isMe': false,
       },
     ];
@@ -62,54 +61,64 @@ class _ChatBotScreenState extends State<ChatBotScreen> {
     }
   }
 
-  Future<String> _getGeminiResponse(String message) async {
+  Future<String> _getAiResponse(String message) async {
     try {
-      final url = Uri.parse(
-        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
-      );
+      final url = Uri.parse('https://api.openai.com/v1/chat/completions');
 
       final response = await http.post(
         url,
         headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': _geminiApiKey,
+          'Content-Type': 'application/json; charset=utf-8',
+          'Authorization': 'Bearer $_openAiApiKey', 
         },
         body: jsonEncode({
-          'contents': [
+          'model': 'gpt-4o-mini', 
+          'messages': [
             {
-              'parts': [
-                {
-                  'text': '너는 친절한 한국어 AI assistant다.\n'
-                      '사용자의 질문에 자연스럽고 정확하게 답변해라.\n'
-                      '불필요하게 형식을 강제하지 말고, 일반적인 AI 챗봇처럼 대화해라.\n'
-                      '사용자가 스미싱, 피싱, 의심 문자, 링크 클릭, 개인정보 입력, 금전 피해에 대해 물어볼 때만 '
-                      '안전 조치와 신고 방법을 함께 안내해라.\n\n'
-                      '사용자 질문:\n$message',
-                }
-              ],
-            }
+              'role': 'system',
+              'content': '''
+[ROLE] 스마트폰 보안 전문 한국어 AI assistant.
+[TONE] 이모지(🔒, 🛡️, 🚨 등)를 적절히 활용하여 친구처럼 친근하고 명확한 '해요체(~해요, ~하세요)'로 답변. 기계적인 매뉴얼 복사/붙여넣기를 절대 피하고, 사용자가 처한 상황에 맞춰 사람처럼 유연하게 컨설팅할 것.
+
+[상황별 답변 로직]
+1. 일상적인 인사나 질문: 
+   ➔ 불필요한 매뉴얼을 꺼내지 말고 가볍게 인사만 나눈다.
+
+2. 사용자가 앱의 '검사 결과(주의, 위험, 상세 경고문 등)'를 복사해 오거나 특정 텍스트를 보여주는 경우:
+   ➔ 앵무새처럼 고정된 매뉴얼을 나열하지 말 것!
+   ➔ 먼저 사용자가 가져온 내용(예: 사칭 가능성, 공포심 유발 등)을 바탕으로 "이 문자가 왜 위험한지" 1~2줄로 알기 쉽게 공감하며 분석해 줄 것.
+   ➔ 그 후, "따라서 고객님 상황에서는 아래 조치가 가장 필요해요"라며 상황에 딱 맞는 맞춤형 대처법을 제시할 것.
+
+3. 사용자가 "링크를 이미 눌렀어!", "돈이 결제됐대!" 등 긴급 상황을 호소하는 경우:
+   ➔ 즉시 안심시킨 뒤, 아래의 핵심 행동 가이드를 조합하여 신속한 조치를 유도할 것.
+
+[핵심 행동 가이드 (상황에 맞게 변형 및 발췌하여 자연스럽게 안내할 것)]
+- 링크 클릭 금지/대처: "절대 URL을 누르지 마세요! 이미 눌렀다면 당황하지 말고 즉시 스마트폰을 비행기 모드(✈️)로 바꿔서 인터넷을 끊어야 해요."
+- 공식 채널 확인: "문자에 적힌 번호로 절대 전화하지 마시고, 공식 앱이나 홈페이지를 통해 직접 확인해 보세요."
+- 백신 검사: "혹시 모르니 V3 Mobile Plus나 알약M 같은 백신 앱으로 정밀 검사를 한 번 돌려보는 걸 추천해요."
+- 차단 및 신고: "해당 번호는 꼭 스팸 차단하시고, KISA(118)나 시티즌코난 앱으로 신고하시면 안전합니다."
+'''
+            },
+            ..._messages.map((msg) => {
+              'role': msg['isMe'] ? 'user' : 'assistant',
+              'content': msg['text'].toString(),
+            }),
           ],
-          'generationConfig': {
-            'temperature': 0.7,
-            'maxOutputTokens': 1000,
-          },
+          'temperature': 0.6, 
+          'max_tokens': 1000,
         }),
       );
 
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
-
-        final text = data['candidates']?[0]?['content']?['parts']?[0]?['text'];
+        final text = data['choices']?[0]?['message']?['content'];
 
         if (text != null && text.toString().trim().isNotEmpty) {
           return text.toString().trim();
         }
-
         return '답변이 비어 있어요. 다시 입력해주세요.';
       } else {
-        return 'Gemini API 오류가 발생했어요.\n'
-            '상태 코드: ${response.statusCode}\n'
-            '응답 내용: ${response.body}';
+        return 'OpenAI API 오류가 발생했어요.\n상태 코드: ${response.statusCode}\n응답 내용: ${response.body}';
       }
     } catch (e) {
       return '네트워크 오류가 발생했어요.\n$e';
@@ -121,7 +130,7 @@ class _ChatBotScreenState extends State<ChatBotScreen> {
       _isLoading = true;
     });
 
-    final aiReply = await _getGeminiResponse(text);
+    final aiReply = await _getAiResponse(text);
 
     setState(() {
       _messages.add({'text': aiReply, 'isMe': false});
@@ -144,7 +153,7 @@ class _ChatBotScreenState extends State<ChatBotScreen> {
 
     _scrollToBottom();
 
-    final String aiReply = await _getGeminiResponse(text);
+    final String aiReply = await _getAiResponse(text);
 
     setState(() {
       _messages.add({'text': aiReply, 'isMe': false});
@@ -172,32 +181,132 @@ class _ChatBotScreenState extends State<ChatBotScreen> {
     });
   }
 
-  Widget _buildQuickAction(String label, IconData icon) {
+  Widget _buildKbQuickButton(String title) {
     return InkWell(
-      onTap: () => _addQuickMessage(label),
-      borderRadius: BorderRadius.circular(14),
+      onTap: () => _addQuickMessage(title),
+      borderRadius: BorderRadius.circular(8),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        margin: const EdgeInsets.only(bottom: 8),
         decoration: BoxDecoration(
-          color: const Color(0xFFEAF4FF),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0xFFB9D8FF)),
+          color: Colors.white,
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+          borderRadius: BorderRadius.circular(8),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 18, color: const Color(0xFF1565C0)),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: const TextStyle(
-                color: Color(0xFF1565C0),
-                fontWeight: FontWeight.w600,
-                fontSize: 13.5,
+        alignment: Alignment.center,
+        child: Text(
+          title,
+          style: const TextStyle(
+            color: Color(0xFF334155),
+            fontWeight: FontWeight.w600,
+            fontSize: 14.5,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRecommendationCard() {
+    return Container(
+      margin: const EdgeInsets.only(top: 10, bottom: 20),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          )
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: 10,
+                child: Container(color: const Color(0xFFFFE066).withOpacity(0.7)),
               ),
+              const Text(
+                '오늘의 보안 소식',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF1E293B),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            '가장 많이 찾는 대처법을 모아왔어요.',
+            style: TextStyle(
+              fontSize: 13.5,
+              color: Color(0xFF64748B),
             ),
-          ],
+          ),
+          const SizedBox(height: 18),
+          _buildKbQuickButton('링크를 실수로 눌렀어요'),
+          _buildKbQuickButton('KISA 및 112 신고 방법'),
+          _buildKbQuickButton('의심스러운 문자 확인해줘'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuickKeywordChip(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: InkWell(
+        onTap: () => _addQuickMessage(title),
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border.all(color: const Color(0xFFD9E6F5)),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.03),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              )
+            ],
+          ),
+          child: Text(
+            title,
+            style: const TextStyle(
+              color: Color(0xFF1565C0),
+              fontWeight: FontWeight.w600,
+              fontSize: 13.5,
+            ),
+          ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildQuickKeywordsRow() {
+    return Container(
+      height: 48,
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        children: [
+          _buildQuickKeywordChip('링크를 실수로 눌렀어요'),
+          _buildQuickKeywordChip('KISA 및 112 신고 방법'),
+          _buildQuickKeywordChip('의심스러운 문자 확인해줘'),
+        ],
       ),
     );
   }
@@ -209,7 +318,7 @@ class _ChatBotScreenState extends State<ChatBotScreen> {
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Row(
         mainAxisAlignment:
-            isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+        isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (!isMe) ...[
@@ -244,10 +353,10 @@ class _ChatBotScreenState extends State<ChatBotScreen> {
                   bottomRight: Radius.circular(isMe ? 6 : 18),
                 ),
                 border:
-                    isMe ? null : Border.all(color: const Color(0xFFD9E6F5)),
+                isMe ? null : Border.all(color: const Color(0xFFD9E6F5)),
                 boxShadow: [
                   BoxShadow(
-	                    color: Colors.black.withValues(alpha: 0.05),
+                    color: Colors.black.withValues(alpha: 0.05),
                     blurRadius: 8,
                     offset: const Offset(0, 3),
                   ),
@@ -390,33 +499,21 @@ class _ChatBotScreenState extends State<ChatBotScreen> {
               ),
             ),
             Expanded(
-              child: ListView.builder(
+              child: ListView(
                 controller: _scrollController,
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                itemCount: _messages.length + (_isLoading ? 1 : 0),
-                itemBuilder: (context, index) {
-                  if (_isLoading && index == _messages.length) {
-                    return _buildLoadingBubble();
-                  }
-                  return _buildMessageBubble(_messages[index]);
-                },
+                children: [
+                  ..._messages.map((msg) => _buildMessageBubble(msg)),
+                  if (_isLoading) _buildLoadingBubble(),
+                  if (_messages.length == 1 && !_isLoading)
+                    _buildRecommendationCard(),
+                ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _buildQuickAction('의심 문자 확인해줘', Icons.sms_outlined),
-                    _buildQuickAction('링크를 눌렀어요', Icons.link_off),
-                    _buildQuickAction('신고 방법 알려줘', Icons.campaign_outlined),
-                  ],
-                ),
-              ),
-            ),
+            
+            if (_messages.length > 1) 
+              _buildQuickKeywordsRow(),
+
             const SizedBox(height: 10),
             SafeArea(
               top: false,
