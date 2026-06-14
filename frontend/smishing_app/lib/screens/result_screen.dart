@@ -140,46 +140,24 @@ class ResultScreen extends StatelessWidget {
   }
 
   String get _shortSummary {
-    final hasUrl = detectedUrl.trim().isNotEmpty && detectedUrl.trim() != '-';
-
-    final reasonText = reason.trim().isNotEmpty
-        ? _replaceEnglishGrades(reason.trim())
-        : '구체적인 판단 이유가 제공되지 않았습니다.';
-
-    final actionText = action.trim().isNotEmpty
-        ? _replaceEnglishGrades(action.trim())
-        : '메시지의 출처를 다시 확인하고, 의심되는 링크나 첨부파일은 열지 않는 것이 좋습니다.';
-
     switch (_gradeText) {
       case '위험':
-        return '위험도가 높은 메시지로 판단되었어요.\n\n'
-            '이 메시지는 스미싱 또는 악성 메시지에서 자주 나타나는 특징이 포함되어 있을 가능성이 큽니다. '
-            '${hasUrl ? '특히 링크가 포함되어 있으므로 절대 바로 누르지 마세요. ' : ''}'
-            '개인정보, 인증번호, 계좌정보, 카드번호, 비밀번호 입력을 요구한다면 매우 위험할 수 있어요.\n\n'
-            '판단 이유: $reasonText\n\n'
-            '권장 행동: $actionText';
+        return '스미싱 의심 요소가 발견되었습니다.\n'
+            '링크 클릭 및 개인정보 입력에 주의하세요.\n'
+            '자세한 내용은 AI 상세 분석 보기에서 확인하세요.';
 
       case '주의':
-        return '주의가 필요한 메시지로 판단되었어요.\n\n'
-            '현재 메시지에서 의심스러운 표현이나 확인이 필요한 요소가 발견되었습니다. '
-            '${hasUrl ? '링크가 포함되어 있다면 공식 앱이나 공식 홈페이지를 직접 검색해서 접속하는 것이 안전해요. ' : ''}'
-            '택배, 결제, 과태료, 본인인증, 계정 정지처럼 급하게 행동하도록 유도하는 문구가 있다면 더 조심해야 합니다.\n\n'
-            '판단 이유: $reasonText\n\n'
-            '권장 행동: $actionText';
+        return '주의가 필요한 메시지입니다.\n'
+            '발신자 및 링크 정보를 한 번 더 확인하세요.\n'
+            '자세한 내용은 AI 상세 분석 보기에서 확인하세요.';
 
       case '안전':
-        return '현재 검사 결과 큰 위험 요소는 발견되지 않았어요.\n\n'
-            '다만 안전으로 표시되더라도 모든 메시지가 100% 안전하다고 단정할 수는 없습니다. '
-            '${hasUrl ? '링크를 열기 전에는 주소가 공식 사이트와 일치하는지 한 번 더 확인해 주세요. ' : ''}'
-            '개인정보나 결제정보를 입력해야 하는 경우에는 반드시 공식 경로인지 확인하는 것이 좋아요.\n\n'
-            '판단 이유: $reasonText\n\n'
-            '권장 행동: $actionText';
+        return '현재 검사 결과 위험 요소가 발견되지 않았습니다.\n'
+            '안전한 메시지로 판단됩니다.\n'
+            '자세한 내용은 AI 상세 분석 보기에서 확인하세요.';
 
       default:
-        return '검사 결과를 확인했어요.\n\n'
-            '메시지의 문구, 포함된 링크, 위험 점수 등을 바탕으로 판단했습니다.\n\n'
-            '판단 이유: $reasonText\n\n'
-            '권장 행동: $actionText';
+        return '메시지 분석이 완료되었습니다.';
     }
   }
 
