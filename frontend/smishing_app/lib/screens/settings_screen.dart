@@ -3,6 +3,7 @@ import '../app_state.dart';
 import '../widgets/setting_header.dart';
 import 'login_screen.dart';
 import 'profile_screen.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart'; 
 
 class SettingsScreen extends StatefulWidget {
   final VoidCallback? onBackHome;
@@ -15,16 +16,41 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   VoidCallback? _listener;
+  final _storage = const FlutterSecureStorage(); 
+  
+  String _userName = '사용자'; 
+  String _userEmail = '이메일 정보 없음';
+  String _loginPlatform = '간편로그인 연동';
 
   @override
   void initState() {
     super.initState();
+    _loadUserData(); 
 
     _listener = () {
       if (mounted) setState(() {});
     };
 
     appState.addListener(_listener!);
+  }
+
+  Future<void> _loadUserData() async { 
+    String? savedName = await _storage.read(key: 'user_name');
+    String? savedEmail = await _storage.read(key: 'user_email');
+    String? platform = await _storage.read(key: 'login_platform');
+
+    if (mounted) {
+      setState(() {
+        if (savedName != null) _userName = savedName;
+        if (savedEmail != null) _userEmail = savedEmail;
+        if (platform != null) {
+          if (platform == 'kakao') _loginPlatform = '카카오 로그인 연동됨';
+          else if (platform == 'naver') _loginPlatform = '네이버 로그인 연동됨';
+          else if (platform == 'google') _loginPlatform = '구글 로그인 연동됨';
+          else _loginPlatform = '일반 로그인 연동됨';
+        }
+      });
+    }
   }
 
   @override
@@ -71,7 +97,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             boxShadow: [
               BoxShadow(
-	                color: Colors.blue.withValues(alpha: 0.25),
+                color: Colors.blue.withValues(alpha: 0.25),
                 blurRadius: 12,
                 offset: const Offset(0, 6),
               ),
@@ -163,7 +189,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             boxShadow: [
               BoxShadow(
-	                color: Colors.blue.withValues(alpha: 0.25),
+                color: Colors.blue.withValues(alpha: 0.25),
                 blurRadius: 12,
                 offset: const Offset(0, 6),
               ),
@@ -192,7 +218,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      appState.userName,
+                      _userName, 
                       style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -201,20 +227,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      appState.userEmail,
+                      _userEmail, 
                       style: const TextStyle(
                         fontSize: 14,
                         color: Colors.white70,
                       ),
                     ),
                     const SizedBox(height: 6),
-                    const Row(
+                    Row(
                       children: [
-                        Icon(Icons.verified, size: 14, color: Colors.white),
-                        SizedBox(width: 4),
+                        const Icon(Icons.verified, size: 14, color: Colors.white),
+                        const SizedBox(width: 4),
                         Text(
-                          '간편로그인 연동',
-                          style: TextStyle(
+                          _loginPlatform, 
+                          style: const TextStyle(
                             fontSize: 12,
                             color: Colors.white,
                             fontWeight: FontWeight.w500,
@@ -467,6 +493,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
                   ),
                   onPressed: () async {
+                    await _storage.deleteAll(); 
                     await appState.logout();
 
                     if (!context.mounted) return;
