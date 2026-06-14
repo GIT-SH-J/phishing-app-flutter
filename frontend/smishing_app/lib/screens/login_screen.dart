@@ -1,4 +1,9 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart'; 
+import 'package:app_links/app_links.dart';       
+import 'package:flutter_secure_storage/flutter_secure_storage.dart'; 
 import '../app_state.dart';
 import '../services/api_client.dart';
 import '../services/auth_api_service.dart';
@@ -6,7 +11,9 @@ import 'signup_screen.dart';
 import 'onboarding_screen.dart';
 import 'permission_screen.dart';
 import '../widgets/social_login_button.dart';
-import '../widgets/social_logos.dart';
+import '../widgets/social_logos.dart'; 
+import '../models/user_profile.dart';
+import '../config/api_config.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -21,6 +28,94 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _obscurePassword = true;
   bool _isLoading = false;
+
+  final _storage = const FlutterSecureStorage();
+  late AppLinks _appLinks;
+
+  @override
+  void initState() {
+    super.initState();
+    _initDeepLinks(); 
+  }
+
+  void _initDeepLinks() {
+    _appLinks = AppLinks();
+
+    _appLinks.uriLinkStream.listen((Uri? uri) async {
+      if (uri == null) return;
+
+      debugPrint('🔗 [딥링크 감지] 수신된 전체 URI: $uri');
+
+      if (uri.toString().contains('login-success')) {
+        final String? token = uri.queryParameters['token'];
+        final String? platform = uri.queryParameters['platform'];
+        final String? rawName = uri.queryParameters['name'];
+        final String? rawEmail = uri.queryParameters['email'];
+        
+        String? name;
+        String? email;
+        try {
+          if (rawName != null) name = Uri.decodeComponent(rawName);
+          if (rawEmail != null) email = Uri.decodeComponent(rawEmail);
+        } catch (e) {
+          debugPrint('데이터 디코딩 오류 (기본값 대체): $e');
+          name = rawName;
+          email = rawEmail;
+        }
+
+        if (token != null) {
+          debugPrint('[$platform 간편로그인 성공] 토큰 획득 완료');
+          
+          await _storage.write(key: 'user_token', value: token);
+          await _storage.write(key: 'login_platform', value: platform ?? 'unknown');
+          await _storage.write(key: 'user_name', value: name ?? '소셜 사용자');
+          await _storage.write(key: 'user_email', value: email ?? 'social_user@email.com');
+          
+       appState.setAuthenticatedSession(
+                    UserProfile(
+                      name: name ?? '소셜 사용자',
+                      email: email ?? 'social_user@email.com',
+                      id: 'social_login',
+                      role: 'user', 
+                    ),
+                  );
+
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const PermissionScreen()),
+            );
+          }
+        }
+      } else if (uri.toString().contains('login-fail')) {
+        debugPrint('간편로그인 실패 신호 수신');
+        _showSnack('소셜 로그인에 실패했습니다. 다시 시도해주세요.');
+      }
+    }, onError: (err) {
+      debugPrint('딥링크 리스너 내부 에러: $err');
+    });
+  }
+
+  void _handleSocialLogin(String platform) async {
+    String urlString = '${ApiConfig.authBaseUrl}/api/auth/$platform';
+
+    final url = Uri.parse(urlString);
+    debugPrint('🚀 외부 브라우저 오픈 요청 API URL: $url');
+    
+    try {
+      if (await canLaunchUrl(url)) {
+        await launchUrl(
+          url, 
+          mode: LaunchMode.externalApplication, 
+        );
+      } else {
+        debugPrint('브라우저를 열 수 없는 주소입니다: $url');
+        _showSnack('로그인 페이지를 열 수 없습니다.');
+      }
+    } catch (e) {
+      debugPrint('소셜 로그인 링크 런처 오류: $e');
+    }
+  }
 
   Future<void> _handleLogin() async {
     final email = _emailController.text.trim();
@@ -43,6 +138,21 @@ class _LoginScreenState extends State<LoginScreen> {
         email: email,
         password: password,
       );
+
+      final String token = ''; 
+      String name = email.split('@')[0];
+      try {
+        if (result.user != null) {
+          name = (result.user as dynamic).name ?? name;
+        }
+      } catch (_) {
+        debugPrint('유저 이름 파싱 실패 - 이메일 기본값 대체');
+      }
+
+      await _storage.write(key: 'user_token', value: token);
+      await _storage.write(key: 'login_platform', value: 'email');
+      await _storage.write(key: 'user_name', value: name);
+      await _storage.write(key: 'user_email', value: email);
 
       appState.setAuthenticatedSession(result.user);
 
@@ -67,8 +177,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _continueAsGuest() async {
     await appState.logout();
+    await _storage.deleteAll();
 
-	    if (!mounted) return;
+    if (!mounted) return;
 
     Navigator.pushReplacement(
       context,
@@ -83,9 +194,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _showSnack(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(
+    ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
     );
   }
@@ -103,10 +212,7 @@ class _LoginScreenState extends State<LoginScreen> {
         onTap: _continueAsGuest,
         behavior: HitTestBehavior.opaque,
         child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 6,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -188,10 +294,7 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 40),
               const Text(
                 '이메일',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 8),
               TextField(
@@ -206,29 +309,18 @@ class _LoginScreenState extends State<LoginScreen> {
                     size: 28,
                     color: Color(0xFF1976D2),
                   ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(
-                      color: Color(0xFF1976D2),
-                      width: 2,
-                    ),
+                    borderSide: const BorderSide(color: Color(0xFF1976D2), width: 2),
                   ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 18,
-                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
                 ),
               ),
               const SizedBox(height: 16),
               const Text(
                 '비밀번호',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 8),
               TextField(
@@ -244,30 +336,16 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   suffixIcon: IconButton(
                     icon: Icon(
-                      _obscurePassword
-                          ? Icons.visibility_off_outlined
-                          : Icons.visibility_outlined,
+                      _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
                     ),
-                    onPressed: () {
-                      setState(() {
-                        _obscurePassword = !_obscurePassword;
-                      });
-                    },
+                    onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                   ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(
-                      color: Color(0xFF1976D2),
-                      width: 2,
-                    ),
+                    borderSide: const BorderSide(color: Color(0xFF1976D2), width: 2),
                   ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 18,
-                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
                 ),
               ),
               const SizedBox(height: 24),
@@ -279,26 +357,15 @@ class _LoginScreenState extends State<LoginScreen> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF1976D2),
                     foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                   child: _isLoading
                       ? const SizedBox(
                           width: 24,
                           height: 24,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.5,
-                            color: Colors.white,
-                          ),
+                          child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
                         )
-                      : const Text(
-                          '로그인',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                      : const Text('로그인', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                 ),
               ),
               const SizedBox(height: 12),
@@ -307,17 +374,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   onPressed: () {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(
-                        builder: (context) => const SignupScreen(),
-                      ),
+                      MaterialPageRoute(builder: (context) => const SignupScreen()),
                     );
                   },
                   child: const Text(
                     '아직 계정이 없으신가요? 회원가입',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Color(0xFF1976D2),
-                    ),
+                    style: TextStyle(fontSize: 16, color: Color(0xFF1976D2)),
                   ),
                 ),
               ),
@@ -327,13 +389,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   const Expanded(child: Divider()),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text(
-                      '간편 로그인',
-                      style: TextStyle(
-                        fontSize: 15,
-                        color: Colors.grey.shade500,
-                      ),
-                    ),
+                    child: Text('간편 로그인', style: TextStyle(fontSize: 15, color: Colors.grey.shade500)),
                   ),
                   const Expanded(child: Divider()),
                 ],
@@ -344,9 +400,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 textColor: const Color(0xFF191919),
                 logo: const KakaoLogo(),
                 text: '카카오로 시작하기',
-                onTap: () {
-                  _showSnack('간편 로그인은 다음 단계에서 연동됩니다');
-                },
+                onTap: () => _handleSocialLogin('kakao'),
               ),
               const SizedBox(height: 12),
               SocialLoginButton(
@@ -354,9 +408,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 textColor: Colors.white,
                 logo: const NaverLogo(),
                 text: '네이버로 시작하기',
-                onTap: () {
-                  _showSnack('간편 로그인은 다음 단계에서 연동됩니다');
-                },
+                onTap: () => _handleSocialLogin('naver'),
               ),
               const SizedBox(height: 12),
               SocialLoginButton(
@@ -364,9 +416,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 textColor: const Color(0xFF191919),
                 logo: const GoogleLogo(),
                 text: '구글로 시작하기',
-                onTap: () {
-                  _showSnack('간편 로그인은 다음 단계에서 연동됩니다');
-                },
+                onTap: () => _handleSocialLogin('google'),
                 hasBorder: true,
               ),
               const SizedBox(height: 22),
