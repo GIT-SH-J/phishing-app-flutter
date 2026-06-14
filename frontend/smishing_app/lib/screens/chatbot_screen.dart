@@ -19,7 +19,7 @@ class _ChatBotScreenState extends State<ChatBotScreen> {
   late List<Map<String, dynamic>> _messages;
   bool _isLoading = false;
 
-  static const String _openAiApiKey = '_여기에 api키를 입력하세요_';
+  static const String _openAiApiKey = '여기 챗봇 API 넣으면 됨';
 
   @override
   void initState() {
